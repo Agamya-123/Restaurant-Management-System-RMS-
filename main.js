@@ -121,14 +121,26 @@ const startLiveRefresh = (view) => {
         const after = _snapshot();
 
         if (before !== after) {
-            // State changed — silently re-render
+            // ── Silent Re-render (No Flicker) ──
+            // Preserve scroll position
+            const wrapper = viewContainer.querySelector('.view-content-wrapper');
+            const scrollPos = wrapper ? wrapper.scrollTop : 0;
+
             let html = '';
             switch (view) {
                 case 'dashboard': html = renderDashboard(appState); break;
                 case 'kitchen':   html = renderKitchen(appState);   break;
                 case 'tables':    html = renderTables(appState);    break;
             }
-            viewContainer.innerHTML = html;
+
+            // Remove 'fade-in' class for silent background updates to prevent flashing
+            const silentHtml = html.replace('fade-in', '');
+            viewContainer.innerHTML = silentHtml;
+            
+            // Restore scroll
+            const newWrapper = viewContainer.querySelector('.view-content-wrapper');
+            if (newWrapper) newWrapper.scrollTop = scrollPos;
+
             attachAllListeners(view, {});
             _updateLiveBadge(true); // flash amber to signal update
         }
@@ -510,6 +522,7 @@ const attachAllListeners = (view, params) => {
                     });
                     appState.context.activeOrder = await res.json();
                     appState.context.tableId = id;
+                    appState.context.previousItems = []; // CRITICAL: Clear any lingering items from other tables
                     notify(`Assigned Table ${id}.`);
                     navigateTo('menu');
                 } else if (table.status === 'OCCUPIED') {
@@ -579,6 +592,7 @@ const attachAllListeners = (view, params) => {
                             modal.remove();
                             appState.context.tableId = id;
                             appState.context.activeOrder = order || null;
+                            appState.context.previousItems = []; // CRITICAL: Clear lingering state
                             navigateTo('menu');
                         });
 
@@ -1069,14 +1083,25 @@ const attachAllListeners = (view, params) => {
 
     // Kitchen: Process Lifecycle
     if (view === 'kitchen') {
-        const setStatus = async (orderId, status) => {
+        const setStatus = async (orderId, status, shouldNavigate = true) => {
             await fetch(`${API_BASE}/orders/${orderId}/status`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status })
             });
             await appState.refresh();
-            navigateTo('kitchen');
+            
+            // If we are already in kitchen, don't trigger a full navigateTo (avoids fade-in flicker)
+            if (appState.currentView === 'kitchen' && shouldNavigate) {
+                const wrapper = viewContainer.querySelector('.view-content-wrapper');
+                const scrollPos = wrapper ? wrapper.scrollTop : 0;
+                viewContainer.innerHTML = renderKitchen(appState).replace('fade-in', '');
+                const newWrapper = viewContainer.querySelector('.view-content-wrapper');
+                if (newWrapper) newWrapper.scrollTop = scrollPos;
+                attachAllListeners('kitchen');
+            } else if (shouldNavigate) {
+                navigateTo('kitchen');
+            }
         };
 
         document.querySelectorAll('.mark-preparing').forEach(btn => {
@@ -1089,10 +1114,18 @@ const attachAllListeners = (view, params) => {
             });
         });
         document.querySelectorAll('.mark-served').forEach(btn => {
-            btn.addEventListener('click', () => {
-                setStatus(btn.getAttribute('data-id'), 'SERVED');
+            btn.addEventListener('click', async () => {
+                const card = btn.closest('.card-glass, .kds-ticket');
+                if (card) {
+                    card.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                    card.style.opacity = '0';
+                    card.style.transform = 'translateY(12px) scale(0.98)';
+                    card.style.pointerEvents = 'none';
+                }
+                
+                await setStatus(btn.getAttribute('data-id'), 'SERVED', false);
                 notify("Order delivered. Ready for checkout.");
-                navigateTo('dashboard');
+                setTimeout(() => navigateTo('dashboard'), 200);
             });
         });
 
