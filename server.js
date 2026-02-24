@@ -248,20 +248,18 @@ app.delete('/api/v1/orders/:id', async (req, res) => {
         
         // Safety: only allow freeing via DELETE if main order is empty OR if called from waiter console
         // (Added sub-order cleanup here as well)
+        // Safety: mark ALL orders for this table as PAID to clear KDS/Dashboard
         const allOrders = await orderRepo.findAll();
-        const tableSubOrders = allOrders.filter(o => 
+        const tableOrders = allOrders.filter(o => 
             o.tableId === order.tableId && 
-            o.isSubOrder && 
-            !['PAID', 'SERVED'].includes(o.status)
+            o.status !== 'PAID'
         );
-
-        for (const sub of tableSubOrders) {
-            await orderRepo.update({ ...sub, status: 'PAID' });
+        for (const o of tableOrders) {
+            await orderRepo.update({ ...o, status: 'PAID' });
         }
 
-        // Free the table
+        // Free the table and delete the triggering order
         await tableRepo.updateStatus(order.tableId, TableStatus.FREE, null);
-        // Delete the main order document
         await orderRepo.delete(req.params.id);
         res.json({ success: true, message: `Order cancelled, Table ${order.tableId} freed.` });
     } catch (e) { res.status(500).json({ error: e.message }); }

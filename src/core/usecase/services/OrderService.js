@@ -13,15 +13,14 @@ export class OrderService {
     async createOrder(tableId, waiterId = 'W1') {
         const order = new Order(`ORD-${Math.random().toString(36).substr(2, 5).toUpperCase()}`, tableId, waiterId);
         
-        // Safety: Clear any "zombie" sub-orders from previous sessions that might be lingering
+        // Safety: Purge ALL previous non-paid orders for this table (Main or Sub)
         const allOrders = await this.orderRepository.findAll();
-        const legacySubOrders = allOrders.filter(o => 
+        const legacyOrders = allOrders.filter(o => 
             o.tableId === tableId && 
-            o.isSubOrder && 
-            !['PAID', 'SERVED'].includes(o.status)
+            o.status !== OrderStatus.PAID
         );
-        for (const sub of legacySubOrders) {
-            await this.orderRepository.update({ ...sub, status: OrderStatus.PAID });
+        for (const old of legacyOrders) {
+            await this.orderRepository.update({ ...old, status: OrderStatus.PAID });
         }
 
         await this.orderRepository.save(order);
@@ -87,20 +86,15 @@ export class OrderService {
             await this.orderRepository.update(order);
             await this.tableRepository.updateStatus(orderDoc.tableId, TableStatus.FREE, null);
 
-            // Close all sub-orders (kitchen rounds) for this table so KDS/pickup clears
+            // Close all associated orders (Main and Sub) for this table
             const allOrders = await this.orderRepository.findAll();
-            const subOrders = allOrders.filter(o =>
+            const staleOrders = allOrders.filter(o =>
                 o.tableId === orderDoc.tableId &&
-                o.isSubOrder &&
-                !['PAID', 'SERVED'].includes(o.status)
+                o.status !== OrderStatus.PAID
             );
-            for (const sub of subOrders) {
-                const subOrder = new Order(sub.id, sub.tableId, sub.waiterId);
-                subOrder.status    = OrderStatus.PAID;
-                subOrder.orderItems = sub.orderItems || [];
-                subOrder.isSubOrder = true;
-                subOrder.checkedItems = sub.checkedItems || [];
-                await this.orderRepository.update(subOrder);
+            for (const old of staleOrders) {
+                const updated = { ...old, status: OrderStatus.PAID };
+                await this.orderRepository.update(updated);
             }
 
             return { success: true, transactionId: paymentResult.transactionId };

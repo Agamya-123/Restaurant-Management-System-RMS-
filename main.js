@@ -46,7 +46,11 @@ const appState = {
             appState.users = data.users || [];
             
             if (appState.context.tableId) {
-                appState.context.activeOrder = appState.orders.find(o => o.tableId === appState.context.tableId && o.status !== 'PAID');
+                // Pick the LATEST non-paid main order (ignores rounds/sub-orders)
+                const active = appState.orders
+                    .filter(o => o.tableId === appState.context.tableId && o.status !== 'PAID' && !o.isSubOrder)
+                    .sort((a,b) => b.id.localeCompare(a.id)); // Newest first
+                appState.context.activeOrder = active[0] || null;
             }
         } catch (e) {
             console.error('API Sync Error:', e);
@@ -61,12 +65,12 @@ const sidebar = document.querySelector('.sidebar');
 
 // ── Live Auto-Refresh Engine ────────────────────────────────────────────────
 const LIVE_VIEWS = ['dashboard', 'kitchen', 'tables'];
-const LIVE_REFRESH_MS = 20_000; // 20 seconds
+const LIVE_REFRESH_MS = 3000; // 3 seconds for snappy real-time feel
 let _liveTimer = null;
 
 /** Lightweight snapshot — only fields that should trigger a re-render */
 const _snapshot = () => JSON.stringify({
-    orders: appState.orders.map(o => ({ id: o.id, s: o.status, n: o.orderItems?.length })),
+    orders: appState.orders.map(o => ({ id: o.id, s: o.status, n: o.orderItems?.length, sub: o.isSubOrder })),
     tables: appState.tables.map(t => ({ id: t.id, s: t.status }))
 });
 
@@ -129,6 +133,19 @@ const startLiveRefresh = (view) => {
             _updateLiveBadge(true); // flash amber to signal update
         }
         // if nothing changed, badge stays green — no re-render needed
+        // 🔔 Waiter notification badge (Global)
+        if (appState.currentUser?.role === UserRole.WAITER) {
+            const readyCount = appState.orders.filter(o => o.status === 'READY').length;
+            const badge = document.getElementById('ready-order-badge');
+            if (badge) {
+                if (readyCount > 0 && appState.currentView !== 'kitchen') {
+                    badge.textContent = readyCount;
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        }
     }, LIVE_REFRESH_MS);
 };
 
@@ -1332,32 +1349,8 @@ document.getElementById('logout-btn')?.addEventListener('click', () => {
 (() => {
     navigateTo('dashboard');
     
-    // Background State Sync (every 5 seconds)
-    setInterval(async () => {
-        if (appState.currentUser && appState.currentView === 'kitchen') {
-            const oldOrderCount = appState.orders.length;
-            await appState.refresh();
-            // Only re-render full view if orders count changed or status changed
-            if (appState.orders.length !== oldOrderCount) {
-                viewContainer.innerHTML = renderKitchen(appState);
-                attachAllListeners('kitchen');
-            }
-        } else if (appState.currentUser) {
-            await appState.refresh();
-        }
-
-        // 🔔 Waiter notification badge: count READY orders
-        const badge = document.getElementById('ready-order-badge');
-        if (badge && appState.currentUser?.role === UserRole.WAITER) {
-            const readyCount = appState.orders.filter(o => o.status === 'READY').length;
-            if (readyCount > 0 && appState.currentView !== 'kitchen') {
-                badge.textContent = readyCount;
-                badge.style.display = 'flex';
-            } else {
-                badge.style.display = 'none';
-            }
-        }
-    }, 5000);
+    // Background state sync is now managed by startLiveRefresh(view)
+    // with a snappy 3s interval. No redundant intervals needed here.
 
     // High-frequency Timer Tick (every 1 second)
     // SURGICAL UPDATE: No more flickering by only updating text nodes
