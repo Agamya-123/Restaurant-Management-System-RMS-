@@ -268,8 +268,14 @@ export const renderDashboard = (state) => {
     `;
 
     // ── Waiter Console ──
-    // Active = everything that hasn't been PAID yet (table stays visible until customer settles)
-    const activeOrders = state.orders.filter(o => ['RECEIVED', 'PREPARING', 'READY', 'SERVED'].includes(o.status));
+    // Only show the main billing order — sub-orders (kitchen rounds) never appear here.
+    // RECEIVED orders are only shown once they have at least one item.
+    const activeOrders = state.orders.filter(o =>
+        !o.isSubOrder && (
+            ['PREPARING', 'READY', 'SERVED'].includes(o.status) ||
+            (o.status === 'RECEIVED' && (o.orderItems?.length ?? 0) > 0)
+        )
+    );
 
     const statusColors = {
         RECEIVED:  { bg: 'rgba(99,102,241,0.08)',   border: 'rgba(99,102,241,0.2)',   text: '#818cf8', label: '📋 Received' },
@@ -297,8 +303,32 @@ export const renderDashboard = (state) => {
                 ` : `
                     <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:1.1rem;">
                         ${activeOrders.map(o => {
-                            const sc = statusColors[o.status] || statusColors.PREPARING;
-                            const subtotal = (o.orderItems || []).reduce((s, i) => s + (i.priceAtPurchase * i.quantity), 0);
+                            // ── Visual Status Aggregation ──
+                            // We use the main order's orderItems (Accumulator) as the bill source.
+                            const activeSubs = (state.orders || []).filter(s => 
+                                s.isSubOrder && s.tableId === o.tableId && !['PAID', 'SERVED'].includes(s.status)
+                            );
+                            const servedSubs = (state.orders || []).filter(s => 
+                                s.isSubOrder && s.tableId === o.tableId && s.status === 'SERVED'
+                            );
+
+                            const displayItems = o.orderItems || [];
+                            const totalQty     = displayItems.reduce((s, i) => s + i.quantity, 0);
+                            const billTotal    = o.totalAmount || displayItems.reduce((s,i) => s + ((i.priceAtPurchase||0)*i.quantity), 0);
+
+                            // Status Logic:
+                            // 1. If any round is READY -> RED ALERT (Ready to serve)
+                            // 2. Else if any round is PREPARING -> Orange (In kitchen)
+                            // 3. Else if all rounds are SERVED -> Orange (Awaiting payment)
+                            // 4. Fallback to main order status
+                            let effectiveStatus = o.status;
+
+                            if (activeSubs.some(s => s.status === 'READY')) effectiveStatus = 'READY';
+                            else if (activeSubs.some(s => s.status === 'PREPARING')) effectiveStatus = 'PREPARING';
+                            else if (servedSubs.length > 0 && activeSubs.length === 0) effectiveStatus = 'SERVED';
+                            
+                            const sc = statusColors[effectiveStatus] || statusColors.PREPARING;
+
                             return `
                                 <div style="background:${sc.bg}; border:1px solid ${sc.border}; border-radius:1rem; padding:1.25rem; display:flex; flex-direction:column; gap:0.85rem;">
 
@@ -306,16 +336,19 @@ export const renderDashboard = (state) => {
                                     <div style="display:flex; justify-content:space-between; align-items:center;">
                                         <div>
                                             <div style="font-size:1rem; font-weight:800; color:white;">Table ${o.tableId}</div>
-                                            <div style="font-size:0.65rem; color:#64748b; margin-top:2px; font-weight:600;">${(o.orderItems || []).reduce((s,i)=>s+i.quantity,0)} items · $${(subtotal * 1.17).toFixed(2)} est.</div>
+                                            <div style="font-size:0.65rem; color:#64748b; margin-top:2px; font-weight:600;">${totalQty} items · $${(billTotal * 1.17).toFixed(2)} est.</div>
                                         </div>
                                         <span style="font-size:0.62rem; font-weight:800; color:${sc.text}; background:${sc.bg}; border:1px solid ${sc.border}; padding:3px 9px; border-radius:999px; text-transform:uppercase; letter-spacing:0.08em;">${sc.label}</span>
                                     </div>
 
-                                    <!-- Items list -->
+                                    <!-- Items list (combined all rounds) -->
                                     <div style="display:flex; flex-direction:column; gap:0.3rem; padding:0.6rem 0; border-top:1px solid rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.05);">
-                                        ${(o.orderItems || []).map(oi => `
-                                            <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
-                                                <span style="color:#e2e8f0; font-weight:600;">${oi.mealItem?.name || 'Item'}</span>
+                                        ${displayItems.map(oi => `
+                                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
+                                                <div style="display:flex; align-items:center; gap:6px;">
+                                                    ${oi._extra ? `<span style="font-size:0.55rem; font-weight:900; color:#3b82f6; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:1px 5px; border-radius:3px; letter-spacing:0.05em;">+ADDED</span>` : ''}
+                                                    <span style="color:#e2e8f0; font-weight:600;">${oi.mealItem?.name || 'Item'}</span>
+                                                </div>
                                                 <span style="color:#64748b; font-weight:700;">× ${oi.quantity}</span>
                                             </div>
                                         `).join('')}
@@ -331,44 +364,30 @@ export const renderDashboard = (state) => {
 
                                     <!-- Actions -->
                                     <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
-
-                                        ${o.status === 'SERVED' ? `
-                                        <!-- SERVED: Pay Bill is the primary action -->
+                                        <!-- Primary Action: Settle/Pay Bill (Always visible for active tables) -->
                                         <button class="trigger-checkout" data-id="${o.id}" style="
                                             flex:2; height:40px; background:linear-gradient(135deg,#10b981,#059669); color:white;
                                             border:none; border-radius:0.6rem; font-weight:800;
-                                            font-size:0.78rem; text-transform:uppercase; cursor:pointer;
+                                            font-size:0.75rem; text-transform:uppercase; cursor:pointer;
                                             display:flex; align-items:center; justify-content:center; gap:6px;
-                                            box-shadow:0 4px 15px rgba(16,185,129,0.25); transition:all 0.2s;
-                                            letter-spacing:0.08em;
+                                            box-shadow:0 4px 12px rgba(16,185,129,0.2); transition:all 0.2s;
+                                            letter-spacing:0.05em;
                                         " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
                                             <span class="material-symbols-outlined" style="font-size:17px;">receipt</span>
-                                            Pay Bill
+                                            Settle Bill
                                         </button>
+
+                                        <!-- Secondary Action: Add Items -->
                                         <button class="trigger-add-items" data-id="${o.id}" data-table="${o.tableId}" style="
                                             flex:1; height:40px; background:rgba(59,130,246,0.12); color:#60a5fa;
                                             border:1px solid rgba(59,130,246,0.2); border-radius:0.6rem;
                                             font-weight:700; font-size:0.7rem; text-transform:uppercase;
                                             cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px;
-                                            transition:background 0.2s;
-                                        " onmouseover="this.style.background='rgba(59,130,246,0.22)'" onmouseout="this.style.background='rgba(59,130,246,0.12)'">
+                                            transition:all 0.2s;
+                                        " onmouseover="this.style.background='rgba(59,130,246,0.2)'" onmouseout="this.style.background='rgba(59,130,246,0.12)'">
                                             <span class="material-symbols-outlined" style="font-size:15px;">add_circle</span>
-                                            Add Items
+                                            Add
                                         </button>
-                                        ` : `
-                                        <!-- PREPARING / READY / RECEIVED: Add Items only -->
-                                        <button class="trigger-add-items" data-id="${o.id}" data-table="${o.tableId}" style="
-                                            flex:1; height:36px; background:rgba(59,130,246,0.15); color:#60a5fa;
-                                            border:1px solid rgba(59,130,246,0.25); border-radius:0.6rem;
-                                            font-weight:700; font-size:0.72rem; text-transform:uppercase;
-                                            letter-spacing:0.08em; cursor:pointer; display:flex;
-                                            align-items:center; justify-content:center; gap:5px;
-                                            transition:background 0.2s;
-                                        " onmouseover="this.style.background='rgba(59,130,246,0.25)'" onmouseout="this.style.background='rgba(59,130,246,0.15)'">
-                                            <span class="material-symbols-outlined" style="font-size:15px;">add_circle</span>
-                                            Add Items
-                                        </button>
-                                        `}
                                     </div>
                                 </div>
                             `;
@@ -433,9 +452,22 @@ export const renderDashboard = (state) => {
     const now = new Date();
     const shiftHour = now.getHours();
     const shiftLabel = shiftHour < 12 ? 'Morning Shift 🌅' : shiftHour < 17 ? 'Afternoon Shift ☀️' : 'Evening Shift 🌙';
-    const preparingOrders = state.orders.filter(o => o.status === 'PREPARING' || o.status === 'RECEIVED');
-    const readyOrders = state.orders.filter(o => o.status === 'READY');
-    const todayServed = state.orders.filter(o => o.status === 'SERVED' || o.status === 'PAID');
+
+    // KDS Landing only shows Sub-Orders (kitchen rounds) for occupied tables
+    const twelveHoursAgo_dh = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const occupiedTables_dh = new Set(state.tables.filter(t => t.status === 'OCCUPIED').map(t => t.id));
+
+    const preparingOrders = state.orders.filter(o => 
+        o.isSubOrder && o.status === 'PREPARING' && 
+        occupiedTables_dh.has(o.tableId) &&
+        new Date(o.createdAt) > twelveHoursAgo_dh
+    );
+    const readyOrders = state.orders.filter(o => 
+        o.isSubOrder && o.status === 'READY' && 
+        occupiedTables_dh.has(o.tableId) &&
+        new Date(o.createdAt) > twelveHoursAgo_dh
+    );
+    const todayServed = state.orders.filter(o => o.isSubOrder && (o.status === 'SERVED' || o.status === 'PAID'));
     const menuCount = state.menu?.length || 0;
 
     // Avg ticket age (minutes)
@@ -1166,15 +1198,15 @@ export const renderMenu = (state, tableId) => {
             <div style="padding:0.75rem 1rem 1rem; background:rgba(0,0,0,0.2); border-top:1px solid rgba(255,255,255,0.06); gap:0.35rem; display:flex; flex-direction:column; flex-shrink:0;">
                 <div style="display:flex; justify-content:space-between; font-size:0.78rem;">
                     <span style="color:#94a3b8; font-weight:500;">Subtotal</span>
-                    <span style="color:white; font-weight:700;">$${subtotal.toFixed(2)}</span>
+                    <span id="order-subtotal" style="color:white; font-weight:700;">$${subtotal.toFixed(2)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.78rem;">
                     <span style="color:#94a3b8; font-weight:500;">Tax (8%)</span>
-                    <span style="color:white; font-weight:700;">$${tax.toFixed(2)}</span>
+                    <span id="order-tax" style="color:white; font-weight:700;">$${tax.toFixed(2)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; padding-top:0.4rem; border-top:1px solid rgba(255,255,255,0.06); font-size:1rem;">
                     <span style="color:white; font-weight:800;">Total</span>
-                    <span style="color:#ec5b13; font-weight:900;">$${total.toFixed(2)}</span>
+                    <span id="order-total" style="color:#ec5b13; font-weight:900;">$${total.toFixed(2)}</span>
                 </div>
 
                 <!-- Order Notes -->
@@ -1278,9 +1310,18 @@ export const renderKitchen = (state) => {
         return `${mins <= 0 ? 1 : mins}m`;
     };
 
-    // ── Stats Calculation ──
-    const activeOrders = state.orders.filter(o => o.status !== 'PAID' && o.status !== 'SERVED');
-    const pendingCount = activeOrders.filter(o => o.status === 'RECEIVED').length;
+    // ── Unified Active Orders Logic (Deltas Only) ──
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const occupiedTables = new Set(state.tables.filter(t => t.status === 'OCCUPIED').map(t => t.id));
+
+    const activeOrders = state.orders.filter(o => 
+        o.isSubOrder && 
+        ['RECEIVED', 'PREPARING', 'READY'].includes(o.status) &&
+        occupiedTables.has(o.tableId) &&
+        new Date(o.createdAt) > twelveHoursAgo
+    );
+
+    const pendingCount = activeOrders.filter(o => o.status === 'PREPARING' || o.status === 'RECEIVED').length;
     const avgLeadTime  = calculateAvgLeadTime(state.orders);
 
     const kitchenStats = `
@@ -1341,21 +1382,28 @@ export const renderKitchen = (state) => {
                     <span style="padding:4px 12px; background:rgba(59,130,246,0.1); color:#3b82f6; border-radius:999px; font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">Waiter Notification</span>
                 </div>
                 <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap:1.5rem; padding-bottom:4rem;">
-                    ${state.orders.filter(o => o.status === 'READY').map(order => `
-                        <div class="card-glass" style="padding:0; border-radius:1.25rem; overflow:hidden; border-top: 5px solid #3b82f6;">
+                    ${activeOrders.filter(o => o.status === 'READY').map(order => `
+                        <div class="card-glass" style="padding:0; border-radius:1.25rem; overflow:hidden; border-top: 5px solid #10b981;">
                             <div style="padding:1.5rem; background:rgba(255,255,255,0.02); display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05);">
                                 <div>
                                     <span style="font-weight:900; font-size:1.3rem; color:white; display:block;">TABLE ${order.tableId}</span>
-                                    <span style="font-size:0.7rem; color:#64748b; font-family:monospace;">ORDER #${order.id.split('-')[1]}</span>
+                                    <span style="font-size:0.7rem; color:#64748b; font-family:monospace;">${order.isSubOrder ? 'ADDITIONAL ROUND' : 'ORDER'} #${order.id.split('-')[1]}</span>
                                 </div>
-                                <span style="background:#3b82f6; color:white; padding:4px 12px; border-radius:8px; font-size:0.75rem; font-weight:800;">READY</span>
+                                <span style="background:#10b981; color:white; padding:4px 12px; border-radius:8px; font-size:0.75rem; font-weight:800;">READY ✓</span>
                             </div>
                             <div style="padding:1.5rem;">
                                 <div style="display:flex; flex-direction:column; gap:0.75rem; margin-bottom:1.5rem;">
-                                    ${order.orderItems.map(item => `
-                                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.03);">
+                                    ${(order.orderItems || []).map(item => `
+                                        <div style="display:flex; justify-content:space-between; align-items:center;
+                                                    padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.03);">
                                             <div style="display:flex; align-items:center; gap:10px;">
-                                                <div style="width:24px; height:24px; border-radius:6px; background:rgba(255,255,255,0.05); color:white; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.8rem;">${item.quantity}</div>
+                                                <div style="width:24px; height:24px; border-radius:6px;
+                                                            background:rgba(16,185,129,0.12); color:#10b981;
+                                                            border:1px solid rgba(16,185,129,0.3);
+                                                            display:flex; align-items:center; justify-content:center;
+                                                            font-weight:800; font-size:0.8rem;">
+                                                        ${item.quantity}
+                                                </div>
                                                 <span style="font-size:0.95rem; font-weight:500; color:#e2e8f0;">${item.mealItem.name}</span>
                                             </div>
                                             <span style="font-size:0.65rem; font-weight:700; color:#94a3b8; text-transform:uppercase; opacity:0.6;">${item.mealItem.category}</span>
@@ -1413,7 +1461,7 @@ export const renderKitchen = (state) => {
                 }
 
                 return `
-                    <div class="card-glass" style="padding:0; border-radius:1.5rem; overflow:hidden; position:relative; border-top:1px solid rgba(255,255,255,0.05);">
+                    <div class="card-glass kds-ticket" style="padding:0; border-radius:1.5rem; overflow:hidden; position:relative; border-top:1px solid rgba(255,255,255,0.05);">
                         <div style="position:absolute; left:0; top:0; bottom:0; width:6px; background:${leftBorder}; box-shadow:0 0 15px ${leftBorder}80; z-index:10;"></div>
                         
                         <!-- Card Header -->
@@ -1443,23 +1491,51 @@ export const renderKitchen = (state) => {
                                 <span style="font-size:0.75rem; color:#64748b; font-weight:600;">Server: <strong style="color:#e2e8f0;">Alex D.</strong></span>
                             </div>
 
-                            <div style="display:flex; flex-direction:column; gap:1rem; margin-bottom:2rem;">
-                                ${order.orderItems.map(item => `
-                                    <div style="display:flex; align-items:start; gap:16px;">
-                                        <div style="width:32px; height:32px; flex-shrink:0; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:white; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:0.9rem;">
-                                            ${item.quantity}
-                                        </div>
-                                        <div style="flex:1;">
-                                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                                <span style="font-size:1rem; font-weight:700; color:#f1f5f9;">${item.mealItem.name}</span>
-                                                <span style="font-size:0.6rem; font-weight:800; text-transform:uppercase; color:#64748b; background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.05);">
-                                                    ${item.mealItem.category || 'Mains'}
-                                                </span>
-                                            </div>
-                                            ${item.quantity > 1 ? `<p style="font-size:0.75rem; color:#10b981; font-weight:600; margin:4px 0 0;">🔥 Priority Multi-Order</p>` : ''}
-                                        </div>
+                            <div style="display:flex; flex-direction:column; gap:0.75rem; margin-bottom:2rem;">
+                                ${order.isSubOrder ? `
+                                    <div style="display:flex; align-items:center; gap:8px; padding:0.45rem 0.75rem;
+                                                border-radius:8px; background:rgba(16,185,129,0.08);
+                                                border:1px solid rgba(16,185,129,0.25); margin-bottom:0.25rem;">
+                                        <span class="material-symbols-outlined" style="font-size:14px; color:#10b981;">add_circle</span>
+                                        <span style="font-size:0.7rem; font-weight:900; color:#10b981; text-transform:uppercase; letter-spacing:0.08em;">
+                                            Additional Round — Cook These
+                                        </span>
                                     </div>
-                                `).join('')}
+                                ` : ''}
+                                ${(() => {
+                                    const checkedSet = new Set((order.checkedItems || []).map(String));
+                                    return order.orderItems.map(item => {
+                                        const id = String(item.mealItem?.id ?? item.mealItem?.name);
+                                        const isDone = checkedSet.has(id);
+                                        return `
+                                            <div class="kds-item-row" data-item="${id}" style="display:flex; align-items:center; gap:12px; opacity:${isDone ? '0.4' : '1'}; transition:opacity 0.2s;">
+                                                <label style="display:flex; align-items:center; gap:0; cursor:pointer; flex-shrink:0;">
+                                                    <input type="checkbox" class="item-checkbox"
+                                                           data-order="${order.id}" data-item="${id}"
+                                                           ${isDone ? 'checked' : ''}
+                                                           style="width:18px; height:18px; accent-color:#10b981; cursor:pointer; flex-shrink:0;">
+                                                </label>
+                                                <div style="width:32px; height:32px; flex-shrink:0; border-radius:8px;
+                                                            background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+                                                            color:white; display:flex; align-items:center; justify-content:center;
+                                                            font-weight:900; font-size:0.9rem; ${isDone ? 'text-decoration:line-through;' : ''}">
+                                                    ${item.quantity}
+                                                </div>
+                                                <div style="flex:1;">
+                                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                                        <span style="font-size:1rem; font-weight:700; color:#f1f5f9; ${isDone ? 'text-decoration:line-through; color:#475569;' : ''}">${item.mealItem.name}</span>
+                                                        <span style="font-size:0.6rem; font-weight:800; text-transform:uppercase; color:#64748b;
+                                                                     background:rgba(255,255,255,0.04); padding:2px 8px; border-radius:4px;
+                                                                     border:1px solid rgba(255,255,255,0.05);">
+                                                            ${item.mealItem.category || 'Mains'}
+                                                        </span>
+                                                    </div>
+                                                    ${item.quantity > 1 ? `<p style="font-size:0.75rem; color:#10b981; font-weight:600; margin:4px 0 0;">🔥 Priority Multi-Order</p>` : ''}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('');
+                                })()}
                             </div>
 
                             ${order.note ? `
@@ -1669,7 +1745,11 @@ const renderOriginalCheckout = (state, orderId) => {
     const order = state.orders.find(o => o.id === orderId);
     if (!order) return `<div class="fade-in" style="padding:4rem; text-align:center;">Order not found.</div>`;
 
-    const subtotal = order.orderItems.reduce((acc, item) => acc + (item.priceAtPurchase * item.quantity), 0);
+    // ── Aggregate all items for this table's final checkout ──
+    // Source of Truth is the main billing orderAccumulator
+    const displayItems = order.orderItems || [];
+
+    const subtotal = displayItems.reduce((acc, item) => acc + (item.priceAtPurchase * item.quantity), 0);
     const serviceCharge = subtotal * 0.10;
     const tax = subtotal * 0.07;
     const grandTotal = subtotal + serviceCharge + tax;
@@ -1684,7 +1764,7 @@ const renderOriginalCheckout = (state, orderId) => {
                 <h2 style="font-size:1.85rem; font-weight:900; margin-bottom:2.5rem; color:white; position:relative; z-index:10;">Settlement Summary</h2>
                 
                 <div style="display:flex; flex-direction:column; gap:1.5rem; position:relative; z-index:10;">
-                    ${order.orderItems.map(item => `
+                    ${displayItems.map(item => `
                         <div style="display:flex; justify-content:space-between; align-items:start; font-size:1.1rem; font-weight:600;">
                             <span style="color:#e2e8f0; display:flex; align-items:center; gap:12px;">
                                 <span style="color:#64748b; font-size:0.9rem; font-weight:400;">${item.quantity}×</span>

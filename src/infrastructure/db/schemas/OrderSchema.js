@@ -19,7 +19,10 @@ const OrderSchema = new mongoose.Schema({
     tableId: { type: String, required: true },
     waiterId: String,
     status: { type: String, default: 'RECEIVED' },  // RECEIVED | PREPARING | READY | SERVED | PAID
-    orderItems: [OrderItemSchema],
+    orderItems: [OrderItemSchema],   // all items — used for billing (main) or batch items (sub)
+    checkedItems: [String],          // mealItem.id strings the chef has ticked off
+    isSubOrder: { type: Boolean, default: false }, // true = kitchen-route round, not billed separately
+    kitchenBatch: [OrderItemSchema], // legacy — no longer used, kept for zero-risk compat
     totalAmount: { type: Number, default: 0 },
     paidAt: { type: Date },
     paymentMethod: { type: String },

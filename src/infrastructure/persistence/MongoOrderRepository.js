@@ -8,6 +8,8 @@ export class MongoOrderRepository {
             waiterId: order.waiterId,
             status: order.status,
             orderItems: order.orderItems,
+            checkedItems: order.checkedItems ?? [],
+            isSubOrder: order.isSubOrder ?? false,
             totalAmount: order.totalAmount,
         });
     }
@@ -20,17 +22,28 @@ export class MongoOrderRepository {
         return await OrderModel.find({}).lean();
     }
 
+    async findByTableId(tableId) {
+        return await OrderModel.find({ tableId }).lean();
+    }
+
     async update(order) {
         await OrderModel.findOneAndUpdate(
             { id: order.id },
             {
                 status: order.status,
                 orderItems: order.orderItems,
+                checkedItems: order.checkedItems ?? [],
+                isSubOrder: order.isSubOrder ?? false,
+                kitchenBatch: order.kitchenBatch ?? [],
                 totalAmount: order.totalAmount,
                 paidAt: order.paidAt,
                 paymentMethod: order.paymentMethod,
             },
-            { new: true }
+            { returnDocument: 'after' }
         );
+    }
+
+    async delete(id) {
+        await OrderModel.findOneAndDelete({ id });
     }
 }

@@ -496,9 +496,101 @@ const attachAllListeners = (view, params) => {
                     notify(`Assigned Table ${id}.`);
                     navigateTo('menu');
                 } else if (table.status === 'OCCUPIED') {
-                    // Show order summary popup instead of immediately navigating
                     const order = appState.orders.find(o => o.tableId === id && o.status !== 'PAID');
-                    showTableModal(id, order);
+                    if (!order || (order.orderItems?.length ?? 0) === 0) {
+                        // Ghost order (accidental click) — ask the waiter what to do
+                        const existingModal = document.getElementById('cancel-table-modal');
+                        if (existingModal) existingModal.remove();
+
+                        const modal = document.createElement('div');
+                        modal.id = 'cancel-table-modal';
+                        modal.style.cssText = `
+                            position:fixed; inset:0; z-index:9999;
+                            background:rgba(0,0,0,0.65); backdrop-filter:blur(6px);
+                            display:flex; align-items:center; justify-content:center;
+                        `;
+                        modal.innerHTML = `
+                            <div style="background:#0f172a; border:1px solid rgba(255,255,255,0.08);
+                                        border-radius:1.25rem; width:380px; max-width:92vw;
+                                        box-shadow:0 30px 80px rgba(0,0,0,0.6); overflow:hidden;">
+                                <div style="padding:1.5rem 1.5rem 0.75rem;">
+                                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:0.75rem;">
+                                        <span class="material-symbols-outlined" style="font-size:28px; color:#f59e0b;">warning</span>
+                                        <div>
+                                            <div style="font-size:1.1rem; font-weight:800; color:white;">Table ${id} — No Items Yet</div>
+                                            <div style="font-size:0.75rem; color:#64748b; margin-top:2px;">This table was opened but nothing was added.</div>
+                                        </div>
+                                    </div>
+                                    <p style="font-size:0.82rem; color:#94a3b8; line-height:1.6; margin:0;">
+                                        Would you like to continue adding items, or cancel and free this table?
+                                    </p>
+                                </div>
+                                <div style="padding:1rem 1.5rem 1.25rem; display:flex; gap:0.6rem; margin-top:0.5rem;">
+                                    <button id="ctm-add-items" style="flex:2; padding:0.7rem;
+                                        background:rgba(59,130,246,0.15); color:#60a5fa;
+                                        border:1px solid rgba(59,130,246,0.25); border-radius:0.75rem;
+                                        font-weight:800; font-size:0.78rem; text-transform:uppercase;
+                                        letter-spacing:0.06em; cursor:pointer; display:flex;
+                                        align-items:center; justify-content:center; gap:6px;">
+                                        <span class="material-symbols-outlined" style="font-size:16px;">add_circle</span>
+                                        Add Items
+                                    </button>
+                                    <button id="ctm-cancel-table" style="flex:2; padding:0.7rem;
+                                        background:rgba(239,68,68,0.12); color:#f87171;
+                                        border:1px solid rgba(239,68,68,0.25); border-radius:0.75rem;
+                                        font-weight:800; font-size:0.78rem; text-transform:uppercase;
+                                        letter-spacing:0.06em; cursor:pointer; display:flex;
+                                        align-items:center; justify-content:center; gap:6px;">
+                                        <span class="material-symbols-outlined" style="font-size:16px;">table_restaurant</span>
+                                        Free Table
+                                    </button>
+                                    <button id="ctm-dismiss" style="flex:1; padding:0.7rem;
+                                        background:transparent; color:#475569;
+                                        border:1px solid rgba(255,255,255,0.06); border-radius:0.75rem;
+                                        font-weight:700; font-size:0.75rem; cursor:pointer;">
+                                        Back
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        document.body.appendChild(modal);
+
+                        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+                        document.getElementById('ctm-dismiss')?.addEventListener('click', () => modal.remove());
+
+                        document.getElementById('ctm-add-items')?.addEventListener('click', () => {
+                            modal.remove();
+                            appState.context.tableId = id;
+                            appState.context.activeOrder = order || null;
+                            navigateTo('menu');
+                        });
+
+                        document.getElementById('ctm-cancel-table')?.addEventListener('click', async () => {
+                            modal.remove();
+                            if (!order) {
+                                // No order doc at all — shouldn't happen but handle gracefully
+                                await appState.refresh();
+                                navigateTo('tables');
+                                return;
+                            }
+                            try {
+                                const res = await fetch(`${API_BASE}/orders/${order.id}`, { method: 'DELETE' });
+                                if (res.ok) {
+                                    notify(`Table ${id} has been freed.`);
+                                } else {
+                                    const err = await res.json();
+                                    notify(err.error || 'Could not free table.', 'error');
+                                }
+                            } catch {
+                                notify('Network error freeing table.', 'error');
+                            }
+                            await appState.refresh();
+                            navigateTo('tables');
+                        });
+                    } else {
+                        // Order has items — show the summary modal
+                        showTableModal(id, order);
+                    }
                 }
             });
         });
@@ -601,24 +693,78 @@ const attachAllListeners = (view, params) => {
             navigateTo('menu');
         });
 
-        // Quantity logic (Flicker-free for both split-panel and card-only views)
+        // Quantity logic — fully flicker-free, no navigateTo on every press
+        const refreshOrderPanel = (order) => {
+            const items = order.orderItems || [];
+            const subtotal = items.reduce((s, i) => s + (i.priceAtPurchase * i.quantity), 0);
+            const tax   = subtotal * 0.08;
+            const total = subtotal + tax;
+
+            // Update totals in-place
+            const subEl   = document.getElementById('order-subtotal');
+            const taxEl   = document.getElementById('order-tax');
+            const totEl   = document.getElementById('order-total');
+            const cartEl  = document.getElementById('cart-count');
+            if (subEl) subEl.textContent = `$${subtotal.toFixed(2)}`;
+            if (taxEl) taxEl.textContent = `$${tax.toFixed(2)}`;
+            if (totEl) totEl.textContent = `$${total.toFixed(2)}`;
+            if (cartEl) cartEl.textContent = items.reduce((a, b) => a + b.quantity, 0);
+
+            // Rebuild just the items list, leave everything else (notes, buttons) untouched
+            const listEl = document.getElementById('order-items-list');
+            if (!listEl) return; // panel not visible
+
+            if (items.length === 0) {
+                listEl.innerHTML = `
+                    <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; opacity:0.3; text-align:center;">
+                        <span class="material-symbols-outlined" style="font-size:4rem; color:#94a3b8; margin-bottom:1rem;">receipt_long</span>
+                        <p style="font-size:0.9rem; font-weight:600; color:#94a3b8;">Add items to start order</p>
+                    </div>`;
+                return;
+            }
+
+            listEl.innerHTML = items.map(oi => `
+                <div style="display:flex; align-items:center; gap:1rem; position:relative;" class="group">
+                    <img src="${oi.mealItem.image}" alt="${oi.mealItem.name}"
+                         style="width:64px; height:64px; border-radius:1rem; object-fit:cover; border:1px solid rgba(255,255,255,0.1);">
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                            <h4 style="font-size:0.95rem; font-weight:800; color:white; margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">${oi.mealItem.name}</h4>
+                            <p style="font-size:1rem; font-weight:800; color:white; margin:0;">$${(oi.mealItem.price * oi.quantity).toFixed(2)}</p>
+                        </div>
+                        <p style="font-size:0.7rem; color:#64748b; margin:2px 0 8px;">Standard Prep</p>
+                        <div style="display:flex; align-items:center; gap:0.75rem;">
+                            <div style="display:flex; align-items:center; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:0.5rem; overflow:hidden;">
+                                <button class="qty-btn minus" data-id="${oi.mealItem.id}" style="width:28px; height:28px; background:none; border:none; color:#94a3b8; cursor:pointer;" onmouseover="this.style.color='#ec5b13'" onmouseout="this.style.color='#94a3b8'">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">remove</span>
+                                </button>
+                                <span class="qty-val" data-id="${oi.mealItem.id}" style="min-width:28px; text-align:center; font-size:0.85rem; font-weight:800; color:white;">${oi.quantity}</span>
+                                <button class="qty-btn plus" data-id="${oi.mealItem.id}" style="width:28px; height:28px; background:none; border:none; color:#94a3b8; cursor:pointer;" onmouseover="this.style.color='#ec5b13'" onmouseout="this.style.color='#94a3b8'">
+                                    <span class="material-symbols-outlined" style="font-size:18px;">add</span>
+                                </button>
+                            </div>
+                            <button class="qty-btn" data-id="${oi.mealItem.id}" data-remove="true" style="font-size:0.75rem; font-weight:800; color:#ef4444; background:none; border:none; cursor:pointer; padding:0;">Remove</button>
+                        </div>
+                    </div>
+                </div>`).join('');
+
+            // Note: Listeners are now handled via delegation in attachAllListeners('menu')
+            // to prevent double-attachment on sidebar refreshes.
+        };
+
         const updateQuantity = async (itemId, delta) => {
             const item = appState.menu.find(m => String(m.id) === String(itemId));
             if (!item) return notify("Dish not found in menu index.", "error");
             if (!appState.context.activeOrder) return notify("No active table session found.", "error");
 
-            // Optimistic UI Update
-            const qtyVals  = document.querySelectorAll(`.qty-val[data-id="${itemId}"]`);
-            const badges   = document.querySelectorAll(`.qty-badge[data-id="${itemId}"]`);
+            // Optimistic update on menu card badges
+            const qtyVals = document.querySelectorAll(`.qty-val[data-id="${itemId}"]`);
+            const badges  = document.querySelectorAll(`.qty-badge[data-id="${itemId}"]`);
             const firstVal = qtyVals[0];
             let nextQty = firstVal ? (parseInt(firstVal.textContent) || 0) + delta : delta;
             if (nextQty < 0) nextQty = 0;
-
             qtyVals.forEach(el => el.textContent = nextQty);
-            badges.forEach(el => {
-                el.textContent = nextQty;
-                el.style.display = nextQty > 0 ? 'flex' : 'none';
-            });
+            badges.forEach(el => { el.textContent = nextQty; el.style.display = nextQty > 0 ? 'flex' : 'none'; });
 
             try {
                 const res = await fetch(`${API_BASE}/orders/${appState.context.activeOrder.id}/status`, {
@@ -626,36 +772,64 @@ const attachAllListeners = (view, params) => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ items: [{ mealItem: item, quantity: delta }] })
                 });
-                
                 if (!res.ok) throw new Error("API rejection");
-                
                 const data = await res.json();
                 appState.context.activeOrder = data;
-                
-                const cartCount = document.getElementById('cart-count');
-                if (cartCount) cartCount.textContent = data.orderItems.reduce((a, b) => a + b.quantity, 0);
-                
-                navigateTo('menu');
-            } catch (err) {
+                // Patch only the panel — zero flicker
+                if (!document.getElementById('order-items-list')) {
+                    navigateTo('menu'); // first item: panel was showing empty state, re-render once
+                } else {
+                    refreshOrderPanel(data);
+                }
+            } catch {
                 notify("Failed to sync order. Please retry.", "error");
-                navigateTo('menu');
             }
         };
 
-        document.querySelectorAll('.qty-btn.plus').forEach(btn => {
-            btn.addEventListener('click', (e) => { e.stopPropagation(); updateQuantity(parseInt(btn.getAttribute('data-id')), 1); });
-        });
-        document.querySelectorAll('.qty-btn.minus').forEach(btn => {
-            if (btn.getAttribute('data-remove') === 'true') return; // handled separately
-            btn.addEventListener('click', (e) => { e.stopPropagation(); updateQuantity(parseInt(btn.getAttribute('data-id')), -1); });
-        });
+        const removeItem = async (itemId) => {
+            const item = appState.menu.find(m => m.id === itemId);
+            const orderItem = appState.context.activeOrder?.orderItems.find(oi => oi.mealItem.id === itemId);
+            if (!orderItem) return;
+            try {
+                const res = await fetch(`${API_BASE}/orders/${appState.context.activeOrder.id}/status`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items: [{ mealItem: item, quantity: -orderItem.quantity }] })
+                });
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                appState.context.activeOrder = data;
+                // Also clear the badge on the menu card
+                document.querySelectorAll(`.qty-badge[data-id="${itemId}"]`).forEach(el => { el.textContent = '0'; el.style.display = 'none'; });
+                document.querySelectorAll(`.qty-val[data-id="${itemId}"]`).forEach(el => el.textContent = '0');
+                refreshOrderPanel(data);
+            } catch {
+                notify("Failed to remove item.", "error");
+            }
+        };
 
-        // Waiter: + button on menu cards
-        document.querySelectorAll('.menu-add-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                updateQuantity(parseInt(btn.getAttribute('data-id')), 1);
-            });
+
+        // ── Event Delegation for Menu & Cart ──
+        // This handles ALL plus/minus/add buttons in the menu view with a single listener
+        viewContainer.addEventListener('click', async (e) => {
+            if (appState.currentView !== 'menu') return;
+            
+            const btn = e.target.closest('.qty-btn, .menu-add-btn');
+            if (!btn) return;
+            
+            e.stopPropagation();
+            const itemId = parseInt(btn.getAttribute('data-id'));
+            const isPlus = btn.classList.contains('plus') || btn.classList.contains('menu-add-btn');
+            const isMinus = btn.classList.contains('minus');
+            const isRemove = btn.getAttribute('data-remove') === 'true';
+
+            if (isRemove) {
+                await removeItem(itemId);
+            } else if (isPlus) {
+                await updateQuantity(itemId, 1);
+            } else if (isMinus) {
+                await updateQuantity(itemId, -1);
+            }
         });
 
         // Guest count adjustment (Visual/Persistent in context)
@@ -679,22 +853,11 @@ const attachAllListeners = (view, params) => {
             });
         });
 
-        // Remove item entirely from summary
+        // Remove item — initial render uses removeItem; refreshOrderPanel re-attaches these too
         document.querySelectorAll('.qty-btn[data-remove="true"]').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
+            btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const id = parseInt(btn.getAttribute('data-id'));
-                const item = appState.menu.find(m => m.id === id);
-                const orderItem = appState.context.activeOrder?.orderItems.find(oi => oi.mealItem.id === id);
-                
-                if (orderItem) {
-                    await fetch(`${API_BASE}/orders/${appState.context.activeOrder.id}/status`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ items: [{ mealItem: item, quantity: -orderItem.quantity }] })
-                    });
-                    navigateTo('menu');
-                }
+                removeItem(parseInt(btn.getAttribute('data-id')));
             });
         });
 
@@ -708,44 +871,156 @@ const attachAllListeners = (view, params) => {
             // ── Compute delta: what NEW items were added since we clicked 'Add Items' ──
             const previousItems = appState.context.previousItems || [];
             const currentItems  = appState.context.activeOrder.orderItems || [];
-            const deltaLines = currentItems
-                .map(oi => {
-                    const prev = previousItems.find(p => String(p.id) === String(oi.mealItem?.id));
-                    const prevQty = prev ? prev.qty : 0;
-                    const addedQty = oi.quantity - prevQty;
-                    return addedQty > 0 ? `${addedQty}× ${oi.mealItem?.name}` : null;
-                })
-                .filter(Boolean);
+
+            // A snapshot means the waiter came from "Add Items" on an existing order.
+            const isAddingToExisting = previousItems.length > 0;
+
+            // Build delta as full item objects (for kitchenBatch) AND as text lines (for note)
+            const deltaItems = [];
+            const deltaLines = [];
+            currentItems.forEach(oi => {
+                const prev    = previousItems.find(p => String(p.id) === String(oi.mealItem?.id));
+                const prevQty = prev ? prev.qty : 0;
+                const addedQty = oi.quantity - prevQty;
+                if (addedQty > 0) {
+                    deltaItems.push({ mealItem: oi.mealItem, quantity: addedQty, priceAtPurchase: oi.priceAtPurchase });
+                    deltaLines.push(`${addedQty}× ${oi.mealItem?.name}`);
+                }
+            });
+
+            // ── If adding to existing order, show confirmation before firing ──
+            if (isAddingToExisting) {
+                if (deltaItems.length === 0) {
+                    return notify("No new items to send — add something new first.", "error");
+                }
+
+                // Remove any old confirmation modal
+                document.getElementById('kitchen-confirm-modal')?.remove();
+
+                await new Promise((resolve, reject) => {
+                    const modal = document.createElement('div');
+                    modal.id = 'kitchen-confirm-modal';
+                    modal.style.cssText = `
+                        position:fixed; inset:0; z-index:9999;
+                        background:rgba(0,0,0,0.7); backdrop-filter:blur(8px);
+                        display:flex; align-items:center; justify-content:center;
+                    `;
+                    modal.innerHTML = `
+                        <div style="background:#0f172a; border:1px solid rgba(255,255,255,0.08);
+                                    border-radius:1.25rem; width:420px; max-width:93vw;
+                                    box-shadow:0 30px 80px rgba(0,0,0,0.7); overflow:hidden;">
+
+                            <div style="padding:1.5rem 1.5rem 0.5rem; display:flex; align-items:center; gap:12px;">
+                                <div style="width:40px; height:40px; border-radius:10px;
+                                            background:rgba(249,115,22,0.15); border:1px solid rgba(249,115,22,0.3);
+                                            display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                                    <span class="material-symbols-outlined" style="color:#f97316; font-size:20px;">local_fire_department</span>
+                                </div>
+                                <div>
+                                    <div style="font-size:1rem; font-weight:900; color:white;">Send to Kitchen?</div>
+                                    <div style="font-size:0.72rem; color:#64748b; margin-top:2px;">
+                                        Table ${appState.context.tableId} · ${deltaItems.length} new item${deltaItems.length > 1 ? 's' : ''}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="padding:0.75rem 1.5rem 0.25rem;">
+                                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);
+                                            border-radius:0.75rem; overflow:hidden;">
+                                    ${deltaItems.map((it, i) => `
+                                        <div style="display:flex; align-items:center; gap:10px; padding:0.65rem 0.9rem;
+                                                    ${i > 0 ? 'border-top:1px solid rgba(255,255,255,0.04)' : ''}">
+                                            <div style="width:28px; height:28px; border-radius:7px;
+                                                        background:rgba(249,115,22,0.12); border:1px solid rgba(249,115,22,0.3);
+                                                        color:#fb923c; display:flex; align-items:center; justify-content:center;
+                                                        font-weight:900; font-size:0.85rem; flex-shrink:0;">
+                                                ${it.quantity}
+                                            </div>
+                                            <span style="font-size:0.9rem; font-weight:600; color:#f1f5f9; flex:1;">${it.mealItem.name}</span>
+                                            <span style="font-size:0.62rem; color:#64748b; text-transform:uppercase;
+                                                         background:rgba(255,255,255,0.04); padding:2px 7px; border-radius:4px;">
+                                                ${it.mealItem.category || 'Mains'}
+                                            </span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                ${note ? `<div style="margin-top:0.6rem; font-size:0.75rem; color:#f59e0b; opacity:0.8;">📝 Note: "${note}"</div>` : ''}
+                            </div>
+
+                            <div style="padding:1rem 1.5rem 1.25rem; display:flex; gap:0.6rem; margin-top:0.5rem;">
+                                <button id="kcm-confirm" style="flex:3; padding:0.75rem;
+                                    background:#f97316; color:white; border:none; border-radius:0.75rem;
+                                    font-weight:900; font-size:0.8rem; text-transform:uppercase;
+                                    letter-spacing:0.07em; cursor:pointer; display:flex;
+                                    align-items:center; justify-content:center; gap:8px;">
+                                    <span class="material-symbols-outlined" style="font-size:16px;">local_fire_department</span>
+                                    Fire to Kitchen
+                                </button>
+                                <button id="kcm-back" style="flex:2; padding:0.75rem;
+                                    background:transparent; color:#94a3b8;
+                                    border:1px solid rgba(255,255,255,0.08); border-radius:0.75rem;
+                                    font-weight:700; font-size:0.78rem; cursor:pointer;">
+                                    ← Back to Edit
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(modal);
+
+                    document.getElementById('kcm-confirm').addEventListener('click', () => {
+                        modal.remove();
+                        resolve(true);
+                    });
+                    document.getElementById('kcm-back').addEventListener('click', () => {
+                        modal.remove();
+                        reject('cancelled');
+                    });
+                    modal.addEventListener('click', e => {
+                        if (e.target === modal) { modal.remove(); reject('cancelled'); }
+                    });
+                }).catch(() => null).then(confirmed => {
+                    if (!confirmed) return; // waiter backed out — do nothing
+                    _fireToKitchen(deltaItems, deltaLines, note, isAddingToExisting);
+                });
+                return; // wait for modal promise
+            }
+
+            // First-time order — fire directly with no confirmation needed
+            _fireToKitchen(deltaItems, deltaLines, note, isAddingToExisting);
+        });
+
+        // ── Internal helper: perform the actual API calls ──
+        async function _fireToKitchen(deltaItems, deltaLines, note, isAddingToExisting) {
             appState.context.previousItems = null; // clear snapshot
 
-            // Build the final kitchen note
-            let kitchenNote = note;
-            if (deltaLines.length > 0 && previousItems.length > 0) {
-                // Adding to an existing order — prepend the delta clearly for the chef
-                const deltaStr = `🆕 EXTRA ITEMS ONLY: ${deltaLines.join(', ')}`;
-                kitchenNote = kitchenNote ? `${deltaStr} | ${kitchenNote}` : deltaStr;
-            }
-
-            if (kitchenNote) {
-                await fetch(`${API_BASE}/orders/${appState.context.activeOrder.id}/note`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ note: kitchenNote })
-                }).catch(() => {});
-            }
-
-            // ── Set status back to PREPARING so it appears on KDS ──
-            const isAddingToExisting = ['PREPARING', 'READY', 'SERVED'].includes(appState.context.activeOrder?.status);
+            // 1. Sync billing Source of Truth (Accumulator)
+            // We save ALL fired items to the main order doc so total bill is correct.
+            // OrderService.updateOrder will append these items (delta) to orderItems.
             await fetch(`${API_BASE}/orders/${appState.context.activeOrder.id}/status`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: 'PREPARING' })
+                body: JSON.stringify({ 
+                    status: 'PREPARING' // Just update status; items already synced via updateQuantity
+                })
             }).catch(() => {});
 
-            notify(isAddingToExisting ? "Additional items sent to kitchen! 🔥" : "Order fired to kitchen successfully!");
+            // 2. Create Kitchen Ticket (Delta Card)
+            // This creates a NEW separate card on the KDS for every click of "Fire".
+            await fetch(`${API_BASE}/orders/batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tableId: appState.context.tableId,
+                    waiterId: appState.currentUser?.id || 'W1',
+                    items: deltaItems,
+                    note: note
+                })
+            }).catch(() => null);
+
+            notify("Ticket fired to kitchen! 🔥");
             appState.context.orderNote = '';
-            navigateTo(isAddingToExisting ? 'dashboard' : 'tables');
-        });
+            navigateTo('dashboard');
+        }
 
 
         // Category filter pills
@@ -801,6 +1076,44 @@ const attachAllListeners = (view, params) => {
                 setStatus(btn.getAttribute('data-id'), 'SERVED');
                 notify("Order delivered. Ready for checkout.");
                 navigateTo('dashboard');
+            });
+        });
+
+        // ── Item checkboxes: chef ticks off each dish as it's plated ──
+        document.querySelectorAll('.item-checkbox').forEach(cb => {
+            cb.addEventListener('change', async () => {
+                const orderId = cb.getAttribute('data-order');
+                const itemId  = String(cb.getAttribute('data-item'));
+                const order   = appState.orders.find(o => o.id === orderId);
+                if (!order) return;
+
+                // Toggle in local state first (optimistic)
+                const checked = new Set((order.checkedItems || []).map(String));
+                cb.checked ? checked.add(itemId) : checked.delete(itemId);
+                order.checkedItems = [...checked];
+
+                // Visual: strike through the row
+                const row = cb.closest('.kds-item-row');
+                if (row) row.style.opacity = cb.checked ? '0.45' : '1';
+
+                // Check if all items ticked → pulse the Mark Ready button
+                const card = cb.closest('.kds-ticket');
+                const allBoxes  = card?.querySelectorAll('.item-checkbox') || [];
+                const allTicked = [...allBoxes].every(b => b.checked);
+                const readyBtn  = card?.querySelector('.mark-ready');
+                if (readyBtn) {
+                    readyBtn.style.background    = allTicked ? '#10b981' : '';
+                    readyBtn.style.borderColor   = allTicked ? '#10b981' : '';
+                    readyBtn.style.color         = allTicked ? 'white' : '';
+                    readyBtn.textContent         = allTicked ? '✓ All Done — Mark Ready' : 'Mark as Ready';
+                }
+
+                // Sync to server (fire-and-forget)
+                fetch(`${API_BASE}/orders/${orderId}/check`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ checkedItems: [...checked] })
+                }).catch(() => {});
             });
         });
 
@@ -1074,12 +1387,21 @@ document.getElementById('logout-btn')?.addEventListener('click', () => {
             });
 
             // Update stats if elements exist
-            const activeOrders = appState.orders.filter(o => o.status !== 'PAID' && o.status !== 'SERVED');
-            const pendingCount = activeOrders.filter(o => o.status === 'RECEIVED').length;
+            // Unified definition: Active kitchen tickets = sub-orders for OCCUPIED tables in non-terminal states from the last 12h
+            const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+            const occupiedTables = new Set(appState.tables.filter(t => t.status === 'OCCUPIED').map(t => t.id));
+            
+            const activeKdsOrders = appState.orders.filter(o => 
+                o.isSubOrder && 
+                ['RECEIVED', 'PREPARING', 'READY'].includes(o.status) &&
+                occupiedTables.has(o.tableId) &&
+                new Date(o.createdAt) > twelveHoursAgo
+            );
+            const pendingCount = activeKdsOrders.filter(o => ['RECEIVED', 'PREPARING'].includes(o.status)).length;
             
             const activeEl = document.getElementById('stat-active-tickets');
             const pendingEl = document.getElementById('stat-pending-queue');
-            if (activeEl) activeEl.textContent = activeOrders.length;
+            if (activeEl) activeEl.textContent = activeKdsOrders.length;
             if (pendingEl) pendingEl.textContent = pendingCount;
         }
     }, 1000);

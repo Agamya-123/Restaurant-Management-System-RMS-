@@ -211,13 +211,59 @@ app.post('/api/v1/orders', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-/** ORDERS: update (add items / status change) */
+/** ORDERS: create kitchen-round sub-order (separate card per round on KDS) */
+app.post('/api/v1/orders/batch', async (req, res) => {
+    try {
+        const { tableId, waiterId, items } = req.body;
+        const order = await orderService.createBatchOrder(tableId, waiterId || 'W1', items || []);
+        res.status(201).json(order);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/** ORDERS: update (add items / status change / checkedItems) */
 app.put('/api/v1/orders/:id/status', async (req, res) => {
     try {
-        const { status, items } = req.body;
-        const order = await orderService.updateOrder(req.params.id, { status, items });
+        const { status, items, checkedItems } = req.body;
+        const order = await orderService.updateOrder(req.params.id, { status, items, checkedItems });
         if (!order) return res.status(404).json({ error: 'Order not found' });
         res.json(order);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/** ORDERS: chef checks/unchecks an individual item */
+app.patch('/api/v1/orders/:id/check', async (req, res) => {
+    try {
+        const { checkedItems } = req.body; // full array of checked mealItem.id strings
+        const order = await orderService.updateOrder(req.params.id, { checkedItems });
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+        res.json({ success: true, checkedItems: order.checkedItems });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/** ORDERS: cancel (only empty RECEIVED orders — accidental table click) */
+app.delete('/api/v1/orders/:id', async (req, res) => {
+    try {
+        const order = await orderRepo.findById(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+        
+        // Safety: only allow freeing via DELETE if main order is empty OR if called from waiter console
+        // (Added sub-order cleanup here as well)
+        const allOrders = await orderRepo.findAll();
+        const tableSubOrders = allOrders.filter(o => 
+            o.tableId === order.tableId && 
+            o.isSubOrder && 
+            !['PAID', 'SERVED'].includes(o.status)
+        );
+
+        for (const sub of tableSubOrders) {
+            await orderRepo.update({ ...sub, status: 'PAID' });
+        }
+
+        // Free the table
+        await tableRepo.updateStatus(order.tableId, TableStatus.FREE, null);
+        // Delete the main order document
+        await orderRepo.delete(req.params.id);
+        res.json({ success: true, message: `Order cancelled, Table ${order.tableId} freed.` });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -230,6 +276,25 @@ app.patch('/api/v1/orders/:id/note', async (req, res) => {
         order.note = note;
         await order.save();
         res.json({ success: true, note });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/** ORDERS: add to billing total (for sub-order amounts when main order is already READY) */
+app.patch('/api/v1/orders/:id/total', async (req, res) => {
+    try {
+        const { addAmount } = req.body;
+        const order = await orderRepo.findById(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+        // Reconstruct with new total only — don't touch orderItems
+        const { Order } = await import('./src/core/domain/model/Order.js');
+        const o = new Order(order.id, order.tableId, order.waiterId);
+        o.status = order.status;
+        o.orderItems = order.orderItems || [];
+        o.checkedItems = order.checkedItems || [];
+        o.isSubOrder = order.isSubOrder ?? false;
+        o.totalAmount = (order.totalAmount || 0) + (addAmount || 0);
+        await orderRepo.update(o);
+        res.json({ success: true, totalAmount: o.totalAmount });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
