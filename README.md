@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🍽️ Savoria RMS
+# Savoria RMS
 
-**A full-stack, real-time Restaurant Management System built with Vanilla JS, Express, and MongoDB.**
+A full-stack, real-time Restaurant Management System built with Vanilla JS, Express, and MongoDB.
 
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![MongoDB](https://img.shields.io/badge/MongoDB-6.0+-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://mongodb.com)
@@ -10,268 +10,277 @@
 [![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
-[Features](#-features) · [Tech Stack](#-tech-stack) · [Getting Started](#-getting-started) · [Architecture](#-architecture) · [API Reference](#-api-reference) · [Contributing](#-contributing)
+[Features](#features) · [Tech Stack](#tech-stack) · [Getting Started](#getting-started) · [Architecture](#architecture) · [API Reference](#api-reference) · [Contributing](#contributing)
 
 </div>
 
 ---
 
-## ✨ Features
+## Features
 
-### 🎭 Role-Based Access Control
+### Role-Based Access
+
 | Role | Access |
 |------|--------|
-| **Admin** | Full access — staff, tables, menu, analytics, billing audit |
-| **Waiter** | Dashboard, tables, menu ordering, reservations, checkout |
-| **Chef** | Kitchen Display System (KDS) only |
+| Admin | Full access — staff management, tables, menu, analytics, billing audit |
+| Waiter | Dashboard, table assignment, menu ordering, reservations, checkout |
+| Chef | Kitchen Display System (KDS) only |
 
-### 🧑‍💼 Waiter Dashboard
-- **Live Active Tables** panel — shows every table with an unpaid order (RECEIVED → PREPARING → READY → SERVED)
-- Colour-coded status badges: 📋 Received · 🔥 In Kitchen · ✓ Ready to Serve · 💳 Awaiting Payment
-- **Add Items** to any in-progress order; system auto-detects the delta and prepends `🆕 EXTRA ITEMS ONLY: …` to the kitchen note
-- **Pay Bill** CTA on SERVED orders goes straight to checkout
-- Reservations panel with one-click RSVP creation and cancellation
+### Waiter Dashboard
 
-### 👨‍🍳 Kitchen Display System (KDS)
+- Active tables panel showing every unpaid order across all status stages
+- Colour-coded status indicators: Received, In Kitchen, Ready to Serve, Awaiting Payment
+- Add items to any in-progress order; the system auto-detects the delta and sends a targeted note to the kitchen listing only the new items
+- Direct Pay Bill action on served orders, routing straight to checkout
+- Reservations panel with one-click creation and cancellation
+
+### Kitchen Display System (KDS)
+
 - Real-time ticket board for all active orders
-- **Live stopwatch** per ticket — white → 🟡 amber (10 min) → 🔴 red (20 min)
-- Status pipeline: **Start Cooking** → **Mark as Ready** → **Deliver to Table**
-- Kitchen notes with clear extra-item annotations
+- Live per-ticket stopwatch — turns amber after 10 minutes, red after 20 minutes
+- Status pipeline: Start Cooking → Mark as Ready → Deliver to Table
+- Kitchen notes rendered per ticket with extra-item annotations clearly separated
 
-### 🪑 Table Management
-- Interactive floor map with FREE / RESERVED / OCCUPIED states
-- Clicking an **OCCUPIED** table shows a glass-morphism order summary modal (items, totals, status) before any action
-- Admin can add new tables dynamically
+### Table Management
 
-### 📋 Menu & Ordering
+- Interactive floor map with FREE, RESERVED, and OCCUPIED states
+- Clicking an occupied table opens an order summary modal (item list, totals, current status) before any navigation occurs
+- Admin can add tables dynamically from the same view
+
+### Menu and Ordering
+
 - Category-filtered, searchable menu grid
-- Inline quantity controls with running total
-- Context-aware "Place Order" / "Send Additional Items" button depending on order state
-- Kitchen notes textarea per order
+- Inline quantity controls with a running total panel
+- Context-aware button label — "Place Order" for new orders, "Send Additional Items" when appending to an existing ticket
+- Per-order kitchen notes field
 
-### 💳 Checkout & Billing
-- Cash / Card / Digital Wallet payment methods
-- Automatic tax calculation (8%)
-- Billing audit trail for Admin
+### Checkout and Billing
 
-### 📊 Analytics (Admin)
-- Revenue, covers, and order-count metrics
-- Popular items, table turnover, average order value
+- Payment methods: Cash, Card, Digital Wallet
+- Automatic 8% tax calculation
+- Full billing audit trail accessible to Admin
 
-### 🔄 Live Auto-Refresh
-- Dashboard, Kitchen, and Tables views poll every **20 s**
-- Only re-renders when the state snapshot actually changes — zero unnecessary flicker
-- Pulsing **● Live** badge in the topbar; flashes amber on detected change
+### Analytics
+
+- Revenue, cover count, and order-volume metrics
+- Top-selling items, table turnover rate, average order value
+
+### Live Auto-Refresh
+
+- Dashboard, Kitchen, and Tables views poll the server every 20 seconds
+- Re-renders only when the state snapshot has actually changed — no unnecessary flicker
+- A small pulsing "Live" indicator in the topbar confirms the connection; it briefly changes to "Updated" when a change is detected
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| **Frontend** | Vanilla JS (ES modules), HTML5, CSS3 |
-| **Build Tool** | Vite 6 |
-| **Backend** | Node.js + Express 5 |
-| **Database** | MongoDB + Mongoose 9 |
-| **Dev Runner** | Concurrently (API + Vite in one command) |
+|-------|------------|
+| Frontend | Vanilla JS (ES modules), HTML5, CSS3 |
+| Build Tool | Vite 6 |
+| Backend | Node.js, Express 5 |
+| Database | MongoDB, Mongoose 9 |
+| Dev Runner | Concurrently (API + Vite in one command) |
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
-- **Node.js** ≥ 18
-- **MongoDB** running locally (or a MongoDB Atlas URI)
-- **Git**
 
-### 1 · Clone the repo
+- Node.js 18 or higher
+- MongoDB running locally, or a MongoDB Atlas connection string
+- Git
+
+### Installation
+
+**1. Clone the repository**
+
 ```bash
 git clone https://github.com/Agamya-123/Restaurant-Management-System-RMS-.git
 cd Restaurant-Management-System-RMS-
 ```
 
-### 2 · Install dependencies
+**2. Install dependencies**
+
 ```bash
 npm install
 ```
 
-### 3 · Configure environment
+**3. Configure environment**
+
 ```bash
 cp .env.example .env
 ```
-Edit `.env` and set your MongoDB connection string:
+
+Open `.env` and set your MongoDB connection string:
+
 ```env
 MONGO_URI=mongodb://localhost:27017/savoria_rms
 ```
 
-### 4 · Start the app
+**4. Start the application**
+
 ```bash
 npm start
 ```
-This runs **both** the Express API (default port `3001`) and the Vite dev server (`http://localhost:5173`) concurrently.
 
-### 5 · Open in browser
+This starts the Express API server and the Vite dev server concurrently.
+
+**5. Open in browser**
+
 ```
 http://localhost:5173
 ```
 
 ### Default Credentials
+
 | Role | Username | Password |
 |------|----------|----------|
 | Admin | `admin` | `admin123` |
 | Waiter | `waiter1` | `waiter123` |
 | Chef | `chef1` | `chef123` |
 
-> Seed data is auto-loaded on first run if the database is empty.
+Seed data is loaded automatically on first run if the database is empty.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-The project follows a **Clean Architecture / Layered Architecture** pattern:
+The project follows a layered architecture pattern separating domain logic from infrastructure and presentation concerns.
 
 ```
 RMS/
-├── index.html              # SPA shell
-├── main.js                 # App bootstrap, routing, event listeners
-├── style.css               # Global design tokens & component styles
-├── server.js               # Express API server entry point
+├── index.html                          # Single-page app shell
+├── main.js                             # App bootstrap, routing, event listeners
+├── style.css                           # Global design tokens and component styles
+├── server.js                           # Express API entry point
 │
 └── src/
-    ├── config/             # Database connection (Mongoose)
+    ├── config/                         # Database connection setup
     │
-    ├── core/               # Domain layer (business logic — no framework deps)
+    ├── core/                           # Domain layer — no framework dependencies
     │   ├── domain/
-    │   │   ├── model/      # Order, Table, User, Reservation entities
-    │   │   ├── enums/      # OrderStatus, UserRole, TableStatus
-    │   │   └── repository/ # Repository interfaces
+    │   │   ├── model/                  # Order, Table, User, Reservation entities
+    │   │   ├── enums/                  # OrderStatus, UserRole, TableStatus
+    │   │   └── repository/             # Repository interfaces
     │   └── usecase/
-    │       └── services/   # OrderService, TableService, UserService …
+    │       └── services/               # OrderService, TableService, UserService
     │
-    ├── infrastructure/     # Data layer (Mongoose schemas + repo implementations)
-    │   ├── database/
-    │   │   └── schemas/    # Mongoose schemas
-    │   └── repositories/   # Concrete Mongoose repository implementations
+    ├── infrastructure/                 # Data layer — Mongoose schemas and repositories
+    │   ├── db/schemas/
+    │   └── persistence/
     │
     └── presentation/
         └── ui/
-            └── Views.js    # All HTML render functions (renderDashboard, renderKitchen …)
+            └── Views.js                # All render functions
 ```
 
 ### Order Lifecycle
+
 ```
-FREE table clicked
-    → POST /orders          (status: RECEIVED)
-    → Menu view
-    → PUT /orders/:id/status (PREPARING) + kitchen note
-        → Chef KDS: Start Cooking
-        → Chef KDS: Mark as Ready  (READY)
-            → Waiter delivers: mark-served (SERVED)
-                → Dashboard: 💳 Awaiting Payment
-                    → Pay Bill → POST /orders/:id/payment (PAID)
-                        → Table freed
+Free table selected
+  → Create order          (status: RECEIVED)
+  → Waiter builds order in menu view
+  → Send to kitchen       (status: PREPARING, kitchen note attached)
+      → Chef: Start Cooking
+      → Chef: Mark as Ready   (status: READY)
+          → Waiter delivers   (status: SERVED)
+              → Dashboard shows Awaiting Payment
+                  → Waiter clicks Pay Bill
+                      → Checkout: select method, confirm
+                          → Payment processed  (status: PAID, table freed)
 ```
 
 ---
 
-## 📡 API Reference
+## API Reference
 
 Base URL: `http://localhost:3001/api/v1`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/auth/login` | Authenticate user |
-| `GET` | `/state` | Full app state snapshot (orders, tables, menu, users) |
-| `GET` | `/menu` | All menu items |
-| `POST` | `/menu` | Create menu item (Admin) |
+| `POST` | `/auth/login` | Authenticate a user |
+| `GET` | `/state` | Full application state snapshot |
+| `GET` | `/menu` | Retrieve all menu items |
+| `POST` | `/menu` | Create a menu item (Admin) |
 | `PUT` | `/menu/:id/toggle` | Toggle item availability |
-| `GET` | `/tables` | All tables |
+| `GET` | `/tables` | Retrieve all tables |
 | `POST` | `/tables` | Add a table (Admin) |
-| `POST` | `/orders` | Create new order |
+| `POST` | `/orders` | Create a new order |
 | `PUT` | `/orders/:id/status` | Update order status |
-| `PATCH` | `/orders/:id/note` | Add kitchen note |
-| `POST` | `/orders/:id/payment` | Process payment |
+| `PATCH` | `/orders/:id/note` | Set kitchen note on an order |
+| `POST` | `/orders/:id/payment` | Process payment for an order |
 | `GET` | `/bills` | Billing history (Admin) |
-| `GET` | `/reservations` | All reservations |
-| `POST` | `/reservations` | Create reservation |
-| `DELETE` | `/reservations/:id` | Cancel reservation |
-| `GET` | `/users` | All staff (Admin) |
-| `POST` | `/users` | Create staff member (Admin) |
+| `GET` | `/reservations` | Retrieve all reservations |
+| `POST` | `/reservations` | Create a reservation |
+| `DELETE` | `/reservations/:id` | Cancel a reservation |
+| `GET` | `/users` | Retrieve all staff (Admin) |
+| `POST` | `/users` | Create a staff member (Admin) |
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are what make open-source great. Any improvements are **warmly welcome**!
+Contributions are welcome. Please follow the steps below to keep the codebase consistent.
 
-### How to Contribute
+### Workflow
 
-1. **Fork** the repository
-   ```bash
-   # Click the Fork button on GitHub, then:
-   git clone https://github.com/<your-username>/Restaurant-Management-System-RMS-.git
-   cd Restaurant-Management-System-RMS-
-   ```
+1. Fork the repository and clone your fork locally.
 
-2. **Create a feature branch**
+2. Create a descriptive branch:
    ```bash
    git checkout -b feature/your-feature-name
-   # or for bug fixes:
+   # or
    git checkout -b fix/issue-description
    ```
 
-3. **Make your changes**
-   - Follow the existing code style (no external CSS frameworks, keep logic in `main.js`, rendering in `Views.js`)
-   - Keep commits atomic and descriptive
+3. Make your changes, keeping commits small and focused.
 
-4. **Commit with a clear message**
-   ```bash
-   git add .
-   git commit -m "feat: add per-item ready checkbox on KDS"
-   ```
-   We use [Conventional Commits](https://www.conventionalcommits.org/) loosely:
-   | Prefix | Use |
-   |--------|-----|
+4. Commit using [Conventional Commits](https://www.conventionalcommits.org/):
+
+   | Prefix | Purpose |
+   |--------|---------|
    | `feat:` | New feature |
    | `fix:` | Bug fix |
-   | `refactor:` | Code restructure, no behaviour change |
-   | `style:` | UI/CSS changes only |
-   | `docs:` | Documentation changes |
+   | `refactor:` | Code restructure with no behaviour change |
+   | `style:` | UI or CSS changes only |
+   | `docs:` | Documentation only |
    | `chore:` | Config, tooling, dependencies |
 
-5. **Push and open a Pull Request**
+   Example:
    ```bash
-   git push origin feature/your-feature-name
+   git commit -m "feat: add per-item ready checkbox to KDS tickets"
    ```
-   Then open a PR on GitHub — fill in the description template explaining **what**, **why**, and **how to test**.
+
+5. Push your branch and open a Pull Request. Describe what changed, why, and how to test it.
+
+### Code Guidelines
+
+- Use `const`/`let` exclusively — no `var`.
+- Prefer `async/await` over `.then()` chains.
+- All render functions in `Views.js` return an HTML string. Do not mutate the DOM directly inside render functions.
+- All event listeners belong in `attachAllListeners()` in `main.js`.
+- Use the `notify(message, type)` helper for all user-facing feedback messages.
 
 ### Good First Issues
-Looking for a place to start? Here are some ideas:
-- 🔒 **Hash passwords** with `bcrypt` — currently stored as plain text
-- 💾 **Session persistence** — restore logged-in user from `localStorage` on refresh
-- 🔔 **Sound notifications** — chime when order status changes
-- ✂️ **Split Bill** — wire up the existing placeholder button
-- 🖨️ **Print Receipt** — styled printable view with `window.print()`
-- 📱 **Responsive layout** — adapt the sidebar and grid for tablet/mobile
 
-### Code Style Guidelines
-- Use `const`/`let`, never `var`
-- Prefer `async/await` over raw `.then()` chains
-- All render functions return an HTML string — no direct DOM mutation in `Views.js`
-- Event listeners always go in `attachAllListeners()` in `main.js`
-- Use the existing `notify(msg, type)` helper for all user-facing feedback
+- Hash passwords with `bcrypt` — currently stored as plain text.
+- Persist the logged-in session in `localStorage` so a page refresh does not log the user out.
+- Wire up the existing "Split Bill" placeholder in the checkout view.
+- Build a printable receipt view using `window.print()`.
+- Add sound notifications when an order status changes.
+- Improve responsiveness for tablet and mobile screen sizes.
 
 ---
 
-## 📄 License
+## License
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-## 👤 Author
+## Author
 
 **Agamya** — [@Agamya-123](https://github.com/Agamya-123)
-
-> If you find this project useful, consider giving it a ⭐ on GitHub — it helps a lot!
-
