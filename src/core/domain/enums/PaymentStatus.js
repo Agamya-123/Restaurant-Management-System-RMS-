@@ -1,0 +1,8 @@
+export const PaymentStatus = {
+    UNPAID: 'UNPAID',
+    PENDING: 'PENDING',
+    COMPLETED: 'COMPLETED',
+    FAILED: 'FAILED',
+    REFUNDED: 'REFUNDED',
+    CANCELLED: 'CANCELLED'
+};
